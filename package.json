@@ -1,0 +1,26 @@
+{
+  "name": "mea20190708",
+  "version": "1.0.0",
+  "description": "草地鹨旅行社",
+  "main": "meadowlark.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/shisheng4215/mea20190708.git"
+  },
+  "keywords": [
+    "mead20190708"
+  ],
+  "author": "s.sheng",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/shisheng4215/mea20190708/issues"
+  },
+  "homepage": "https://github.com/shisheng4215/mea20190708#readme",
+  "dependencies": {
+    "express": "^4.17.1"
+  },
+  "devDependencies": {}
+}
