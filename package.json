@@ -20,7 +20,8 @@
   },
   "homepage": "https://github.com/shisheng4215/mea20190708#readme",
   "dependencies": {
-    "express": "^4.17.1"
+    "express": "^4.17.1",
+    "express-handlebars": "^3.1.0"
   },
   "devDependencies": {}
 }
