@@ -1,6 +1,6 @@
 var express = require('express');
 var fortune = require('./lib/fortune.js');
-
+var credentials = require('./credentials.js');
 var app=express();
 
 //设置handlebars 视图引擎
@@ -45,12 +45,47 @@ app.use('/upload',function(req,res,next){
 });
 
 
+app.use(require('cookie-parser')(credentials.cookieSecret));
+app.use(require('express-session')());
+
+app.use(function(req,res,next){
+	if(!res.locals.partials)
+		res.locals.partials={};
+	res.locals.partials.weatherContext=getWeatherData();
+	next();
+});
+
+function getWeatherData(){
+	return{
+		locations:[
+			{name:'Portland',forecastUrl:'http://www.wunderground.com/US/OR/Portland.html',iconUrl:'http://icons-ak.wxug.com/i/c/k/cloudy.gif',weather:'Overcast',temp:'54.1 F (12.3 C)',},
+			{name:'Bend',forecastUrl:'http://www.wunderground.com/US/OR/Bend.html',iconUrl:'http://icons-ak.wxug.com/i/c/k/partlycloudy.gif',weather:'Partly Cloudy',temp:'55.0 F (12.8 C)',},
+			{name:'Manzanita',forecastUrl:'http://www.wunderground.com/US/OR/Manzantita.html',iconUrl:'http://icons-ak.wxug.com/i/c/k/rain.gif',weather:'Light Rain',temp:'55.0 F (12.8 C)',},
+		],
+	};
+}
+
+
+
 
 app.disable('x-powered-by');
+
+
+//使用flash
+app.use(function(req,res,next){
+	//如果有即显消息，把它传到上下文中，然后清除它
+	res.locals.flash=req.session.flash;
+	delete req.session.flash;
+	next();
+});
+
+
+
 //--------路由
 app.use(express.static(__dirname+'/public'));
 
 app.get('/',function(req,res){
+	res.cookie('monster','nom nom',{signed:true});
 	res.render('home');
 });
 
@@ -95,6 +130,39 @@ app.get('/greeting',function(req,res){
 
 app.get('/newsletter',function(req,res){
 	res.render('newsletter',{csrf:'CSRF token goes here'});
+});
+
+
+app.post('/newsletter',function(req,res){
+	var name = req.body.name || '',email=req.body.email || '';
+	//输入验证
+	if(!email.match(VALID_EMAIL_REGEX)){
+		if(req.xhr) return res.json({error:'Invalid name email address.'});
+		req.session.flash={
+						type:'danger',
+						intro:'Validation error',
+						message:'The email address you entered was not valid.',
+		};
+		return res.redirect(303,'/newsletter/archive');
+	}
+	new NewsletterSignup({name:name,email:email}).save(function(err){
+		if(err){
+			if(req.xhr) return res.json({error:'Database error'});
+			req.session.flash = {
+				type:'danger',
+				intro:'Database error!',
+				message:'There was a database error; please try again later.',
+			}
+			return res.redirect(303,'/newsletter/archive');
+		}
+		if(req.xhr) return res.json({success:true});
+		req.session.flash={
+			type:'success',
+			intro:'Thank you!',
+			message:'You have now been signed up for the newsletter.',
+		};
+		return res.redirect(303,'/newsletter/archive');
+	});
 });
 
 app.post('/process',function(req,res){
@@ -158,6 +226,14 @@ app.get('/test',function(req,res){
 	});
 });
 
+app.get('/cookie-test1',function(req,res){
+	var monster = req.signedCookies.monster;
+	req.session.userName = '111Anonymous';
+	//var colorScheme = req.sesson.colorScheme|| 'dark';
+	console.log('monster: '+monster);
+	res.send('monster: '+monster);
+
+});
 
 app.post('/process-contact',function(req,res){
 	var bodyParser=require('body-parser');
@@ -223,23 +299,6 @@ app.use(function(err,req,res,next){
 	res.status(500);
 	res.render('500');
 });
-
-app.use(function(req,res,next){
-	if(!res.locals.partials)
-		res.locals.partials={};
-	res.locals.partials.weather=getWeatherData();
-	next();
-});
-
-function getWeatherData(){
-	return{
-		locations:[
-			{name:'Portland',forecastUrl:'http://www.wunderground.com/US/OR/Portland.html',iconUrl:'http://icons-as.wxug.com/i/c/k/cloudy.gif',weather:'Overcast',temp:'54.1 F (12.3 C)',},
-			{name:'Bend',forecastUrl:'http://www.wunderground.com/US/OR/Bend.html',iconUrl:'http://icons-ak.wxug.com/i/c/k/partycloudy.gif',weather:'Partly Cloudy',temp:'55.0 F (12.8 C)',},
-			{name:'Manzanita',forecastUrl:'http://www.wunderground.com/US/OR/Manzantita.html',iconUrl:'http://icons-ak.wxug.com/i/c/k/rain.gif',weather:'Light Rain',temp:'55.0 F (12.8 C)',},
-		],
-	};
-}
 
 
 app.listen(app.get('port'),function(){
