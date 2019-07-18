@@ -2,9 +2,11 @@ var express = require('express');
 var fortune = require('./lib/fortune.js');
 var credentials = require('./credentials.js');
 var app=express();
-
+var http=require('http');
 //设置handlebars 视图引擎
 var handlebars = require('express-handlebars').create({defaultLayout:'main',extname:'.hbs'});
+var morgan = require('morgan');
+
 
 
 
@@ -20,10 +22,67 @@ app.set('view engine','.hbs');
 
 app.set('port',process.env.PORT ||3000);
 
+
+app.use(function(req,res,next){
+	//为这个请求创建一个域
+	var domain = require('domain').create();
+	//处理这个域中的错误
+	domain.on('error',function(err){
+		console.error('DOMAIN ERROR CAUGHT 域error 捕获到：\n',err.stack);
+		try{
+			//在5秒内进行故障保护关机
+			setTimeout(function(){
+				console.log('Failsafe shutdown 安全关机.');
+				process.exit(1);
+			},5000);
+			//从集群中断开
+			var worker = require('cluster').worker;
+			if(worker) worker.disconnect();
+			//停止接收新请求
+			server.close();
+			
+			try{
+				//尝试使用Express错误路由
+				next(err);
+			}catch(err){
+				//如果Express错误路由失效，尝试返回普通文本响应
+				console.error('Express error mechanism failed. Express Error机制失败\n',err.stack);
+				res.statusCode=500;
+				res.setHeader('content-type','text/plain');
+				res.end('Server error.');
+			}
+		}catch(err){
+			console.error('Unable to send 500 response. 无法发送500响应\n',err.stack);
+		}
+	});
+	//向域中添加请求和响应对象
+	domain.add(req);
+	domain.add(res);
+	
+	//执行该域中剩余的请求链
+	domain.run(next);
+});
+
+
+
+
+
 app.use(function(req,res,next){
 	res.locals.showTests=app.get('env')!=='production'&& req.query.test==='1';
 	next();
 });
+
+
+switch(app.get('env')){
+	case 'development':
+		app.use(require('morgan')('dev'));
+		break;
+	case 'production':
+		app.use(require('express-logger')({
+			path:__dirname + '/log/requests.log'
+		}));
+		break;
+}
 
 var bodyParser=require('body-parser');
 app.use(bodyParser.urlencoded({extended:false}));
@@ -48,12 +107,17 @@ app.use('/upload',function(req,res,next){
 app.use(require('cookie-parser')(credentials.cookieSecret));
 app.use(require('express-session')());
 
+app.use(require('./lib/tourRequiresWaiver.js'));
+
+
+
 app.use(function(req,res,next){
 	if(!res.locals.partials)
 		res.locals.partials={};
 	res.locals.partials.weatherContext=getWeatherData();
 	next();
 });
+
 
 function getWeatherData(){
 	return{
@@ -72,6 +136,7 @@ app.disable('x-powered-by');
 
 
 //使用flash
+
 app.use(function(req,res,next){
 	//如果有即显消息，把它传到上下文中，然后清除它
 	res.locals.flash=req.session.flash;
@@ -81,8 +146,28 @@ app.use(function(req,res,next){
 
 
 
+app.use(function(req,res,next){
+	var cluster = require('cluster');
+	if(cluster.isWorker) 
+		console.log('Worker %d received request',cluster.worker.id);
+	next();
+});
+
+
+
 //--------路由
 app.use(express.static(__dirname+'/public'));
+
+
+app.get('/fail',function(req,res){
+	throw new Error('Nope!');
+});
+
+app.get('/epic-fail',function(req,res){
+	process.nextTick(function(){
+		throw new Error('Kaboom!');
+	});
+});
 
 app.get('/',function(req,res){
 	res.cookie('monster','nom nom',{signed:true});
@@ -273,7 +358,7 @@ app.put('/api/tours/:id',function(req,res){
 	}
 });
 
-app.del('app/tour/:id',function(req,res){
+app.delete('app/tour/:id',function(req,res){
 	var i;
 	for(var i=tours.length-1;i>=0;i--){
 		if(tours[i].id==req.param.id) 
@@ -296,12 +381,21 @@ app.use(function(req,res){
 //定制500页面
 app.use(function(err,req,res,next){
 	console.error(err.stack);
-	res.status(500);
-	res.render('500');
+	app.status(500).render('500');
 });
 
+function startServer(){
+	http.createServer(app).listen(app.get('port'),function(){
+		console.log('Express started in '+ app.get('env') +'mode on http://localhost:'+
+						app.get('port')+';press Ctrl-C to terminate.');
+	});
+}
 
-app.listen(app.get('port'),function(){
-	console.log('Express started on http://localhost:'+app.get('port')+'; press Ctrl-C to termainate.');
-});
+if(require.main===module){
+	startServer();
+}else{
+	module.exports=startServer;
+}
+
+
 
