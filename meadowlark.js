@@ -6,6 +6,9 @@ var http=require('http');
 //设置handlebars 视图引擎
 var handlebars = require('express-handlebars').create({defaultLayout:'main',extname:'.hbs'});
 var morgan = require('morgan');
+var mongoose = require('mongoose');
+var opts={useNewUrlParser:true,keepAlive:1};
+var Vacation = require('./models/vacation.js');
 
 
 
@@ -44,14 +47,14 @@ app.use(function(req,res,next){
 			try{
 				//尝试使用Express错误路由
 				next(err);
-			}catch(err){
+			}catch(error){
 				//如果Express错误路由失效，尝试返回普通文本响应
 				console.error('Express error mechanism failed. Express Error机制失败\n',err.stack);
 				res.statusCode=500;
 				res.setHeader('content-type','text/plain');
 				res.end('Server error.');
 			}
-		}catch(err){
+		}catch(error){
 			console.error('Unable to send 500 response. 无法发送500响应\n',err.stack);
 		}
 	});
@@ -76,13 +79,19 @@ app.use(function(req,res,next){
 switch(app.get('env')){
 	case 'development':
 		app.use(require('morgan')('dev'));
+		mongoose.connect(credentials.mongo.development.connectionString,opts);
 		break;
 	case 'production':
 		app.use(require('express-logger')({
 			path:__dirname + '/log/requests.log'
 		}));
+		mongoose.connect(credentials.mongo.production.connectionString,opts);
 		break;
+	default:
+		throw new Error('Unknown execution environment: '+app.get('env'));
 }
+
+
 
 var bodyParser=require('body-parser');
 app.use(bodyParser.urlencoded({extended:false}));
@@ -105,18 +114,34 @@ app.use('/upload',function(req,res,next){
 
 
 app.use(require('cookie-parser')(credentials.cookieSecret));
-app.use(require('express-session')());
+
 
 app.use(require('./lib/tourRequiresWaiver.js'));
+
+const session = require('express-session');
+const MongoStore = require('connect-mongo')(session);
+const connection = mongoose.connection;
+
+app.use(session({
+	secret:'keyboard cat',
+	saveUninitialized:false,
+	resave:false,
+	cart:'',
+	store: new MongoStore({mongooseConnection:connection})
+})); 
 
 
 
 app.use(function(req,res,next){
+		
 	if(!res.locals.partials)
 		res.locals.partials={};
 	res.locals.partials.weatherContext=getWeatherData();
 	next();
 });
+
+
+
 
 
 function getWeatherData(){
@@ -138,6 +163,7 @@ app.disable('x-powered-by');
 //使用flash
 
 app.use(function(req,res,next){
+	
 	//如果有即显消息，把它传到上下文中，然后清除它
 	res.locals.flash=req.session.flash;
 	delete req.session.flash;
@@ -170,6 +196,7 @@ app.get('/epic-fail',function(req,res){
 });
 
 app.get('/',function(req,res){
+	console.log('=====================\n'+session.secret);  //输出session
 	res.cookie('monster','nom nom',{signed:true});
 	res.render('home');
 });
@@ -237,7 +264,7 @@ app.post('/newsletter',function(req,res){
 				type:'danger',
 				intro:'Database error!',
 				message:'There was a database error; please try again later.',
-			}
+			};
 			return res.redirect(303,'/newsletter/archive');
 		}
 		if(req.xhr) return res.json({success:true});
@@ -288,7 +315,25 @@ app.post('/contest/vacation-photo/:year/:month',function(req,res){
 	});
 });
 
+app.get('/set-currency/:currency',function(req,res){
+	req.session.currency=req.params.currency;
+	console.log(req.session);
+	return res.redirect(303,'/vacations');
+	
+});
 
+function convertFromUSD(value,currency){
+	switch(currency){
+		case 'USD':
+			return value*1;
+		case 'GBP':
+			return value*0.6;
+		case 'BTC':
+			return value*0.0023707918444761;
+		default:
+			return NaN;
+	}
+}
 
 
 //无布局的视图渲染
@@ -333,6 +378,67 @@ app.get('/thank-you',function(req,res){
 	res.end();
 });
 
+
+app.get('/vacations',function(req,res){
+	Vacation.find({available:true},function(err,results){
+		var currency=req.session.currency || 'USD';
+	var context={
+			currency:currency,
+			vacations:results.map(function(vacation){
+				return{
+					sku:vacation.sku,
+					name:vacation.name,
+					description:vacation.description,
+					inSeason:vacation.inSeasion,
+					price:convertFromUSD(vacation.priceInCents/100,currency),
+					qty:vacation.qty,
+				};
+			})
+		};
+		switch(currency){
+			case 'USD': context.currencyUSD='selected';break;
+			case 'GBP': context.currencyGBP='selected';break;
+			case 'BTC': context.currencyBTC='selected';break;
+				
+			
+		}
+		res.render('vacations',context);
+	});
+
+});
+
+var VacationInSeasonListener = require('./models/vacationInSeasonListener.js');
+
+app.get('/notify-me-when-in-season',function(req,res){
+	res.render('notify-me-when-in-season',{sku:req.query.sku});
+});
+
+app.post('/notify-me-when-in-season',function(req,res){
+	VacationInSeasonListener.update(
+		{email:req.body.email},
+		{$push:{skus:req.body.sku}},
+		{upsert:true},function(err){
+			if(err){
+				console.error(err.stack);
+				req.session.flash={
+					type:'danger',
+					intro:'Ooops!',
+					message:'There was an error proccessing your request.',
+				};
+				return res.redirect(303,'/vacations');
+			}
+			req.session.flash={
+				type:'success',
+				intro:'Thank you!',
+				message:'You will be notified when this vacation is in season.',
+			};
+			return res.redirect(303,'/vacations');
+		}
+	);
+});
+
+
+
 var tours=
 [
 	{id:0,name:'Hood River',price:99.99},
@@ -360,7 +466,7 @@ app.put('/api/tours/:id',function(req,res){
 
 app.delete('app/tour/:id',function(req,res){
 	var i;
-	for(var i=tours.length-1;i>=0;i--){
+	for(i=tours.length-1;i>=0;i--){
 		if(tours[i].id==req.param.id) 
 			break;
 	}
@@ -381,8 +487,61 @@ app.use(function(req,res){
 //定制500页面
 app.use(function(err,req,res,next){
 	console.error(err.stack);
-	app.status(500).render('500');
+	res.status(500).render('500');
 });
+
+
+// initialize vacations
+Vacation.find(function(err, vacations){
+    if(vacations.length) return;
+
+    new Vacation({
+        name: 'Hood River Day Trip',
+        slug: 'hood-river-day-trip',
+        category: 'Day Trip',
+        sku: 'HR199',
+        description: 'Spend a day sailing on the Columbia and ' + 
+            'enjoying craft beers in Hood River!',
+        priceInCents: 9995,
+        tags: ['day trip', 'hood river', 'sailing', 'windsurfing', 'breweries'],
+        inSeason: true,
+        maximumGuests: 16,
+        available: true,
+        packagesSold: 0,
+    }).save();
+
+    new Vacation({
+        name: 'Oregon Coast Getaway',
+        slug: 'oregon-coast-getaway',
+        category: 'Weekend Getaway',
+        sku: 'OC39',
+        description: 'Enjoy the ocean air and quaint coastal towns!',
+        priceInCents: 269995,
+        tags: ['weekend getaway', 'oregon coast', 'beachcombing'],
+        inSeason: false,
+        maximumGuests: 8,
+        available: true,
+        packagesSold: 0,
+    }).save();
+
+    new Vacation({
+        name: 'Rock Climbing in Bend',
+        slug: 'rock-climbing-in-bend',
+        category: 'Adventure',
+        sku: 'B99',
+        description: 'Experience the thrill of rock climbing in the high desert.',
+        priceInCents: 289995,
+        tags: ['weekend getaway', 'bend', 'high desert', 'rock climbing', 'hiking', 'skiing'],
+        inSeason: true,
+        requiresWaiver: true,
+        maximumGuests: 4,
+        available: false,
+        packagesSold: 0,
+        notes: 'The tour guide is currently recovering from a skiing accident.',
+    }).save();
+});
+
+
 
 function startServer(){
 	http.createServer(app).listen(app.get('port'),function(){
