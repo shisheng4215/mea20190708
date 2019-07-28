@@ -10,6 +10,7 @@ var mongoose = require('mongoose');
 var opts={useNewUrlParser:true,keepAlive:1};
 var Vacation = require('./models/vacation.js');
 var rest = require('connect-rest');
+var https=require('https');
 
 
 
@@ -615,11 +616,15 @@ Vacation.find(function(err, vacations){
     }).save();
 });
 
-
+var fs = require('fs');
+var options= {
+	key: fs.readFileSync(__dirname + '/ssl/meadowlark.pem'),
+	cert: fs.readFileSync(__dirname + '/ssl/meadowlark.crt'),
+};
 
 function startServer(){
-	http.createServer(app).listen(app.get('port'),function(){
-		console.log('Express started in '+ app.get('env') +'mode on http://localhost:'+
+	https.createServer(options,app).listen(app.get('port'),function(){
+		console.log('Express started in '+ app.get('env') +'mode on https://localhost:'+
 						app.get('port')+';press Ctrl-C to terminate.');
 	});
 }
