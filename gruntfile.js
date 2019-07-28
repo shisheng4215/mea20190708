@@ -9,8 +9,12 @@ module.exports=function(grunt){
 
     grunt.initConfig({
         jshint:{
-            app:['meadowlark.js','public/js/**/*.js','lib/**/*.js'],
+
+			app:['meadowlark.js','public/js/**/*.js','lib/**/*.js'],
             qa:['Gruntfile.js','public/qa/**/*.js','qa/**/*.js'],
+			options:{
+				"esversion": 6,
+            },
             },
         linkChecker:{
                 dev:{

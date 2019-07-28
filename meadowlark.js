@@ -9,7 +9,7 @@ var morgan = require('morgan');
 var mongoose = require('mongoose');
 var opts={useNewUrlParser:true,keepAlive:1};
 var Vacation = require('./models/vacation.js');
-
+var rest = require('connect-rest');
 
 
 
@@ -25,6 +25,7 @@ app.set('view engine','.hbs');
 
 app.set('port',process.env.PORT ||3000);
 
+app.use('/api',require('cors')());
 
 app.use(function(req,res,next){
 	//为这个请求创建一个域
@@ -117,6 +118,8 @@ app.use(require('cookie-parser')(credentials.cookieSecret));
 
 
 app.use(require('./lib/tourRequiresWaiver.js'));
+
+
 
 const session = require('express-session');
 const MongoStore = require('connect-mongo')(session);
@@ -322,6 +325,16 @@ app.get('/set-currency/:currency',function(req,res){
 	
 });
 
+
+app.get('/user(name)?/:id',function(req,res){
+	var users={
+				0:{name:'张三',sex:'男'},
+				1:{name:'李四',sex:'女'},				
+				};
+	res.render('user',{user:users[req.params.id]
+	});
+});
+
 function convertFromUSD(value,currency){
 	switch(currency){
 		case 'USD':
@@ -335,6 +348,7 @@ function convertFromUSD(value,currency){
 	}
 }
 
+var routes = require('./routes.js')(app);
 
 //无布局的视图渲染
 app.get('/no-layout',function(req,res){
@@ -477,6 +491,66 @@ app.delete('app/tour/:id',function(req,res){
 		res.json({error:'No such tour exists.'});
 	}
 });
+
+
+
+var Attraction = require('./models/attraction.js');
+
+app.get('/api/attractions',function(req,res){
+	Attraction.find({approved:true},function(err,attractions){
+		if(err) return res.send(500,'Error occurred:database error.');
+		res.json(attractions.map(function(a){
+			return{
+				name:a.name,
+				id:a._id,
+				description:a.description,
+				location:a.location,
+			};
+		}));
+	});
+});
+
+
+app.post('/api/attraction',function(req,res){
+	var a = new Attraction({
+		name:req.body.name,
+		description:req.body.description,
+		location:{lat:req.body.lat,lng:req.body.lng},
+		history:{
+			event:'created',
+			email:'req.body.email',
+			date:new Date(),
+		},
+		approved:false,
+	});
+	a.save(function(err,a){
+		if(err) return res.send(500,'Error occurred:database error.');
+		res.json({id:a._id});
+	});
+});
+
+
+app.get('/api/attraction/:id',function(req,res){
+	Attraction.findById(req.params.id,function(err,a){
+		if(err) return res.send(500,'Error occurred:database error.');
+		res.json({
+			name:a.name,
+			id:a._id,
+			description:a.description,
+			location:a.location,
+		});
+	});
+});
+
+
+var apiOptions = {
+	context:'/api',
+	domain:require('domain').create(),
+};
+
+//app.use(rest.rester(apiOptions));
+
+
 
 //定制404页面
 app.use(function(req,res){
